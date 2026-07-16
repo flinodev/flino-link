@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flino-link",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+
+  // KV namespace that stores slug -> URL mappings.
+  // The id gets filled in after running: wrangler kv namespace create LINKS
+  "kv_namespaces": [
+    {
+      "binding": "LINKS",
+      "id": "c71eed91933f43d78dca8389ba9b9f3a"
+    }
+  ],
+
+  // Single Durable Object (SQLite-backed) that keeps per-slug click counts.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COUNTER",
+        "class_name": "ClickCounter"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ClickCounter"]
+    }
+  ],
+
+  // Serve the Worker directly on the apex domain. Requires the flino.link
+  // zone to be active on this Cloudflare account; Cloudflare creates the
+  // DNS record automatically.
+  "routes": [
+    {
+      "pattern": "flino.link",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}
