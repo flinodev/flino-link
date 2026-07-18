@@ -4,7 +4,7 @@ Acortador de URLs personal, corriendo en producción sobre la red edge de
 Cloudflare. Cada link se sirve en `flino.link/<slug>`; la raíz y los slugs
 desconocidos redirigen a [flino.dev](https://flino.dev).
 
-**Demo:** https://flino.link/dev
+**Demo:** https://flino.link/me
 
 |                       |                                                          |
 | --------------------- | -------------------------------------------------------- |
