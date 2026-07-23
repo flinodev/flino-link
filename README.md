@@ -1,123 +1,125 @@
 # flino.link
 
-Acortador de URLs personal, corriendo en producción sobre la red edge de
-Cloudflare. Cada link se sirve en `flino.link/<slug>`; la raíz y los slugs
-desconocidos redirigen a [flino.dev](https://flino.dev).
+> 🇪🇸 [Versión en español](README.es.md)
+
+Personal URL shortener running in production on Cloudflare's edge network.
+Links are served at `flino.link/<slug>`; the root and unknown slugs redirect
+to [flino.dev](https://flino.dev).
 
 **Demo:** https://flino.link/me
 
-|                       |                                                          |
-| --------------------- | -------------------------------------------------------- |
-| Latencia de redirect  | < 10 ms desde 300+ ubicaciones edge                      |
-| Servidores            | 0 (serverless puro, sin cold starts perceptibles)        |
-| Costo de operación    | $0/mes de infraestructura · $4.68/año de dominio         |
-| Capacidad (tier free) | ~100.000 requests/día                                    |
-| Stack                 | TypeScript · Cloudflare Workers · KV · Durable Objects   |
-| Dependencias runtime  | Ninguna — sin frameworks, sin npm en producción          |
+|                        |                                                          |
+| ---------------------- | -------------------------------------------------------- |
+| Redirect latency       | < 10 ms from 300+ edge locations                         |
+| Servers                | 0 (pure serverless, no perceptible cold starts)          |
+| Operating cost         | $0/mo infrastructure · $4.68/yr domain                   |
+| Capacity (free tier)   | ~100,000 requests/day                                    |
+| Stack                  | TypeScript · Cloudflare Workers · KV · Durable Objects   |
+| Runtime dependencies   | None — no frameworks, no npm in production               |
 
-![Dashboard de administración](docs/dashboard.png)
+![Admin dashboard](docs/dashboard.png)
 
-## Por qué
+## Why
 
-Dos objetivos: tener links cortos propios bajo mi marca (cada link compartido
-apunta tráfico hacia `flino.dev`), y construir un sistema completo —
-DNS, edge computing, storage distribuido, auth, dashboard — operando en
-producción real con costo cero.
+Two goals: short links under my own brand (every shared link points traffic
+back to `flino.dev`), and building a complete system — DNS, edge computing,
+distributed storage, auth, dashboard — running in real production at zero
+cost.
 
-## Arquitectura
+## Architecture
 
 ```mermaid
 flowchart LR
-    U((Visitante)) -->|GET /abc123| W[Worker\nflino-link]
+    U((Visitor)) -->|GET /abc123| W[Worker\nflino-link]
     W -->|slug → URL| KV[(Workers KV)]
     W -->|302 redirect| U
-    W -.->|"waitUntil (async,\nsin latencia extra)"| DO[(Durable Object\nClickCounter\nSQLite)]
-    A((Admin)) -->|Bearer API key| API[/API REST\n/api/links/]
+    W -.->|"waitUntil (async,\nno added latency)"| DO[(Durable Object\nClickCounter\nSQLite)]
+    A((Admin)) -->|Bearer API key| API[/REST API\n/api/links/]
     API --> KV
     API --> DO
-    A -->|/admin| D[Dashboard\nHTML inline]
+    A -->|/admin| D[Dashboard\ninline HTML]
 ```
 
-Un solo Worker atiende todo el dominio:
+A single Worker serves the whole domain:
 
-- **Redirects** — el camino caliente. Una lectura a KV (replicado
-  globalmente, lecturas en el edge) y un `302`. Nada más toca ese camino.
-- **Conteo de clicks** — un Durable Object con SQLite embebido guarda
-  `slug → (count, last_click)`. El incremento va dentro de
-  `ctx.waitUntil()`: se ejecuta *después* de enviar la respuesta, así que
-  contar clicks añade **cero latencia** al redirect.
-- **API REST** — CRUD de links con auth Bearer. La key vive como
-  [secret del Worker](https://developers.cloudflare.com/workers/configuration/secrets/),
-  nunca en el repo.
-- **Dashboard** (`/admin`) — una sola página HTML servida inline desde el
-  Worker: crear links, copiar, borrar y ver clicks por link. Sin framework,
-  sin build step, dark mode automático.
+- **Redirects** — the hot path. One KV read (globally replicated, served
+  from the edge) and a `302`. Nothing else touches that path.
+- **Click counting** — a Durable Object with embedded SQLite stores
+  `slug → (count, last_click)`. The increment runs inside
+  `ctx.waitUntil()`: it executes *after* the response is sent, so counting
+  clicks adds **zero latency** to the redirect.
+- **REST API** — link CRUD with Bearer auth. The key lives as a
+  [Worker secret](https://developers.cloudflare.com/workers/configuration/secrets/),
+  never in the repo.
+- **Dashboard** (`/admin`) — a single HTML page served inline from the
+  Worker: create links, copy, delete, and see clicks per link. No
+  framework, no build step, automatic dark mode.
 
-## Decisiones de diseño
+## Design decisions
 
-**KV para los links, Durable Object para los contadores.** KV es ideal para
-el patrón "muchas lecturas, pocas escrituras" de un acortador, pero sus
-escrituras son eventualmente consistentes — inservibles para contar. Un
-Durable Object da un punto único de consistencia con SQLite transaccional,
-y en el camino de lectura no estorba porque el conteo es asíncrono.
+**KV for links, a Durable Object for counters.** KV is ideal for a
+shortener's read-heavy, write-light pattern, but its writes are eventually
+consistent — useless for counting. A Durable Object provides a single
+point of consistency with transactional SQLite, and it stays out of the
+read path because counting is asynchronous.
 
-**Dominio dedicado en vez de rutas bajo flino.dev.** Los acortadores
-atraen abuso (spam, phishing) y terminan en blocklists. Con un dominio
-separado, esa reputación de riesgo queda aislada de mi sitio principal.
+**A dedicated domain instead of routes under flino.dev.** Shorteners
+attract abuse (spam, phishing) and end up on blocklists. With a separate
+domain, that reputation risk stays isolated from my main site.
 
-**Slugs aleatorios de 6 caracteres base62** (~57 mil millones de
-combinaciones) generados con `crypto.getRandomValues`, con opción de slug
-personalizado. Slugs reservados (`api`, `admin`, …) no son asignables.
+**Random 6-character base62 slugs** (~57 billion combinations) generated
+with `crypto.getRandomValues`, with optional custom slugs. Reserved slugs
+(`api`, `admin`, …) cannot be assigned.
 
-**Fallo cerrado hacia la marca.** Slug inexistente o raíz → redirect a
-`flino.dev`. Un link roto nunca muestra un error; muestra mi sitio.
+**Fail toward the brand.** Unknown slug or root → redirect to
+`flino.dev`. A broken link never shows an error; it shows my site.
 
 ## API
 
-Autenticación: header `Authorization: Bearer <API_KEY>`.
+Authentication: `Authorization: Bearer <API_KEY>` header.
 
 ```sh
-# Crear link (slug aleatorio)
+# Create a link (random slug)
 curl -X POST https://flino.link/api/links \
   -H "Authorization: Bearer $API_KEY" \
-  -d '{"url":"https://ejemplo.com/pagina-larga"}'
+  -d '{"url":"https://example.com/some-long-page"}'
 # → { "slug": "pQ4xhx", "url": "…", "shortUrl": "https://flino.link/pQ4xhx" }
 
-# Crear link con slug propio
+# Create a link with a custom slug
 curl -X POST https://flino.link/api/links \
   -H "Authorization: Bearer $API_KEY" \
-  -d '{"url":"https://github.com/usuario","slug":"gh"}'
+  -d '{"url":"https://github.com/someuser","slug":"gh"}'
 
-# Listar todos (incluye clicks y último click)
+# List all links (includes clicks and last click)
 curl -H "Authorization: Bearer $API_KEY" https://flino.link/api/links
 
-# Consultar / borrar
+# Get / delete
 curl -H "Authorization: Bearer $API_KEY" https://flino.link/api/links/gh
 curl -X DELETE -H "Authorization: Bearer $API_KEY" https://flino.link/api/links/gh
 ```
 
-## Desarrollo
+## Development
 
 ```sh
 npm install
-npm run dev          # usa la API_KEY de .dev.vars (no versionado)
+npm run dev          # uses the API_KEY from .dev.vars (not versioned)
 ```
 
-## Despliegue (una sola vez)
+## Deployment (one-time setup)
 
-1. En Cloudflare: añadir el sitio `flino.link` y activar la zona
-   (cambiar los nameservers del registrar a los que indique Cloudflare).
+1. In Cloudflare: add the `flino.link` site and activate the zone
+   (point the registrar's nameservers to the ones Cloudflare assigns).
 2. `npx wrangler login`
-3. `npx wrangler kv namespace create LINKS` y copiar el `id` resultante
-   en `wrangler.jsonc`.
-4. `npx wrangler secret put API_KEY` (elegir una clave larga y aleatoria,
-   p. ej. `openssl rand -hex 32`).
+3. `npx wrangler kv namespace create LINKS` and copy the resulting `id`
+   into `wrangler.jsonc`.
+4. `npx wrangler secret put API_KEY` (pick a long random key,
+   e.g. `openssl rand -hex 32`).
 5. `npm run deploy`
 
-Despliegues posteriores: solo `npm run deploy`.
+Subsequent deploys: just `npm run deploy`.
 
-## Posibles extensiones
+## Possible extensions
 
-- Analytics más ricos (país, referrer) con Workers Analytics Engine
-- Expiración de links (TTL nativo de KV)
-- Email en `@flino.link` vía Cloudflare Email Routing
+- Richer analytics (country, referrer) with Workers Analytics Engine
+- Link expiration (native KV TTL)
+- Email at `@flino.link` via Cloudflare Email Routing
